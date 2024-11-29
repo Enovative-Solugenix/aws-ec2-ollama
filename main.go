@@ -43,24 +43,24 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	// Create a reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(target)
 
-	// Modify the director to handle streaming
+	// Modify the director to handle the request
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		req.Header.Set("X-Forwarded-Host", req.Header.Get("Host"))
 		req.Host = target.Host
 
-		// Check if the client requested streaming
-		if req.Header.Get("Accept") == "text/event-stream" {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Header().Set("Connection", "keep-alive")
+		// Ensure the client requests JSON, even if Accept header is not set
+		if req.Header.Get("Accept") == "" {
+			req.Header.Set("Accept", "application/json")
 		}
 	}
 
-	// Use a custom transport to handle streaming responses
-	proxy.Transport = &streamTransport{http.DefaultTransport}
+	// Use a custom transport to handle JSON responses
+	proxy.Transport = &jsonTransport{http.DefaultTransport}
 
+	// Set response headers to return JSON
+	w.Header().Set("Content-Type", "application/json")
 	proxy.ServeHTTP(w, r)
 }
 
@@ -70,18 +70,19 @@ func validateAPIKey(r *http.Request) bool {
 	return authHeader == "Bearer "+apiKey
 }
 
-type streamTransport struct {
+type jsonTransport struct {
 	http.RoundTripper
 }
 
-func (t *streamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (t *jsonTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.RoundTripper.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if req.Header.Get("Accept") == "text/event-stream" {
-		resp.Header.Set("Content-Type", "text/event-stream")
+	// Ensure that responses are in JSON format
+	if req.Header.Get("Accept") == "application/json" {
+		resp.Header.Set("Content-Type", "application/json")
 	}
 
 	return resp, nil
